@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import time  # <--- Butuh ini buat jeda waktu
+import cv2 # <--- Butuh ini untuk menyimpan gambar
 from ultralytics import YOLO
 
 # === Load YOLO Model ===
@@ -9,10 +10,13 @@ model = YOLO("yolov8n.pt")
 
 # === Folder Gambar ===
 folder = "images/"
+folder_processed = "images_processed/"
 
-# Pastikan folder ada
+# Pastikan folder-folder ada
 if not os.path.exists(folder):
     os.makedirs(folder)
+if not os.path.exists(folder_processed):
+    os.makedirs(folder_processed)
 
 # === Connect to Database ===
 db_name = "suhat_monitor.db"
@@ -34,9 +38,9 @@ def setup_database():
 
 # === Fungsi Menentukan Status ===
 def get_status(total):
-    if total <= 10: return "lancar", "🟢"
-    elif total <= 30: return "ramai", "🟡"
-    elif total <= 60: return "padat", "🔴"
+    if total <= 2: return "lancar", "🟢"
+    elif total <= 4: return "ramai", "🟡"
+    elif total <= 10: return "padat", "🔴"
     else: return "macet", "⚠️"
 
 # === SETUP AWAL ===
@@ -68,6 +72,11 @@ while True:
                 # 1. Deteksi
                 results = model(image_path, verbose=False) # verbose=False biar terminal gak penuh text YOLO
                 
+                # Simpan gambar hasil deteksi
+                annotated_image = results[0].plot() # Ambil gambar dengan bounding box
+                output_path = os.path.join(folder_processed, filename)
+                cv2.imwrite(output_path, annotated_image)
+
                 car_count = 0
                 for box in results[0].boxes:
                     if int(box.cls) == 2: # Class 2 = Mobil
@@ -95,7 +104,7 @@ while True:
             pass
 
         # Istirahat 2 detik sebelum ngecek folder lagi biar CPU gak panas
-        time.sleep(2)
+        time.sleep(5)
 
     except KeyboardInterrupt:
         print("\n🛑 Program dihentikan user.")
