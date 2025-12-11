@@ -82,6 +82,47 @@ def run_etl():
                     # 1. Deteksi
                     results = model(image_path, verbose=False)
 
+                    # Remove overlapping bounding boxes with IoU > 90%
+                    boxes = results[0].boxes
+                    if len(boxes) > 1:
+                        # Calculate IoU and filter overlapping boxes
+                        keep_indices = list(range(len(boxes)))
+                        for i in range(len(boxes)):
+                            if i not in keep_indices:
+                                continue
+                            for j in range(i + 1, len(boxes)):
+                                if j not in keep_indices:
+                                    continue
+                                
+                                # Get box coordinates (xyxy format)
+                                box_i = boxes[i].xyxy[0].cpu().numpy()
+                                box_j = boxes[j].xyxy[0].cpu().numpy()
+                                
+                                # Calculate intersection area
+                                x1_inter = max(box_i[0], box_j[0])
+                                y1_inter = max(box_i[1], box_j[1])
+                                x2_inter = min(box_i[2], box_j[2])
+                                y2_inter = min(box_i[3], box_j[3])
+                                
+                                if x2_inter > x1_inter and y2_inter > y1_inter:
+                                    inter_area = (x2_inter - x1_inter) * (y2_inter - y1_inter)
+                                    box_i_area = (box_i[2] - box_i[0]) * (box_i[3] - box_i[1])
+                                    box_j_area = (box_j[2] - box_j[0]) * (box_j[3] - box_j[1])
+                                    union_area = box_i_area + box_j_area - inter_area
+                                    iou = inter_area / union_area if union_area > 0 else 0
+                                    
+                                    # If IoU > 80%, remove box with lower confidence
+                                    if iou > 0.8:
+                                        conf_i = boxes[i].conf[0].item()
+                                        conf_j = boxes[j].conf[0].item()
+                                        if conf_i < conf_j:
+                                            keep_indices.remove(i)
+                                        else:
+                                            keep_indices.remove(j)
+                        
+                        # Filter boxes to keep only selected indices
+                        results[0].boxes = boxes[keep_indices]
+
                     # Simpan gambar hasil
                     annotated_image = results[0].plot()
                     cv2.imwrite(os.path.join(folder_processed, filename), annotated_image)
