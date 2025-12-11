@@ -1,58 +1,66 @@
 import os
 import sqlite3
-import time  # <--- Butuh ini buat jeda waktu
+import time
+import cv2
 from ultralytics import YOLO
 
-# === Load YOLO Model ===
-print("Sedang memuat model YOLO...")
-model = YOLO("yolov8n.pt")
+# === Load Custom Model ===
+# Kita PERCAYA pakai model.pt karena urutannya sudah benar (0,1,2,3)
+try:
+    print("Sedang memuat model custom (model.pt)...")
+    model = YOLO("model.pt")
+except:
+    print("⚠️ Error: model.pt tidak ditemukan! Pastikan file ada di folder.")
+    exit()
 
 # === Folder Gambar ===
 folder = "images/"
+folder_processed = "images_processed/"
 
 # Pastikan folder ada
-if not os.path.exists(folder):
-    os.makedirs(folder)
+if not os.path.exists(folder): os.makedirs(folder)
+if not os.path.exists(folder_processed): os.makedirs(folder_processed)
 
-# === Connect to Database ===
+# === Database Setup ===
 db_name = "suhat_monitor.db"
 
-# === Fungsi Setup Database ===
 def setup_database():
     conn = sqlite3.connect(db_name)
     cur = conn.cursor()
-    # Hapus tabel lama biar bersih (opsional, kalau mau data numpuk hapus baris DROP ini)
-    # cur.execute("DROP TABLE IF EXISTS traffic_data")
-    # cur.execute("DROP TABLE IF EXISTS road_status")
-    # cur.execute("DROP TABLE IF EXISTS notifications")
     
-    cur.execute("""CREATE TABLE IF NOT EXISTS traffic_data (image TEXT, total_vehicle INTEGER)""")
+    # UPDATE STRUKTUR: Ganti kolom 'bus' jadi 'bicycle' sesuai model temanmu
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS traffic_data (
+        image TEXT,
+        total_vehicle INTEGER,
+        car INTEGER,
+        motorcycle INTEGER,
+        bicycle INTEGER, 
+        truck INTEGER
+    )
+    """)
     cur.execute("""CREATE TABLE IF NOT EXISTS road_status (image TEXT, status TEXT, icon TEXT)""")
     cur.execute("""CREATE TABLE IF NOT EXISTS notifications (image TEXT, message TEXT)""")
     conn.commit()
     conn.close()
 
-# === Fungsi Menentukan Status ===
+# === Status Jalan ===
 def get_status(total):
-    if total <= 10: return "lancar", "🟢"
-    elif total <= 30: return "ramai", "🟡"
-    elif total <= 60: return "padat", "🔴"
+    # Ambang batas disesuaikan
+    if total <= 15: return "lancar", "🟢"
+    elif total <= 40: return "ramai", "🟡"
+    elif total <= 80: return "padat", "🔴"
     else: return "macet", "⚠️"
 
-# === SETUP AWAL ===
+# === MAIN PROGRAM ===
 setup_database()
-processed_files = set() # <--- Daftar file yang SUDAH diproses (biar gak double)
+processed_files = set()
 
-print("\n🚀 SIAP MEMANTAU FOLDER 'images/' SECARA REAL-TIME...")
-print("Tekan Ctrl+C untuk berhenti.\n")
+print("\n🚀 SIAP MEMANTAU FOLDER DENGAN MODEL CUSTOM (0=Mobil, 1=Motor)...")
 
-# === LOOPING UTAMA ===
 while True:
     try:
-        # Cek isi folder saat ini
         current_files = os.listdir(folder)
-        
-        # Cari file baru (yang belum ada di processed_files)
         new_files = [f for f in current_files if f not in processed_files and f.lower().endswith(('.jpg', '.png', '.jpeg'))]
 
         if new_files:
@@ -61,44 +69,53 @@ while True:
 
             for filename in new_files:
                 image_path = os.path.join(folder, filename)
-                
-                # Tunggu sebentar memastikan file sudah tertulis sempurna oleh script sebelah
-                time.sleep(0.5) 
+                time.sleep(0.5)
 
                 # 1. Deteksi
-                results = model(image_path, verbose=False) # verbose=False biar terminal gak penuh text YOLO
+                results = model(image_path, verbose=False)
+
+                # Simpan gambar hasil (Fitur Rizqy)
+                annotated_image = results[0].plot()
+                cv2.imwrite(os.path.join(folder_processed, filename), annotated_image)
+
+                # 2. Hitung Sesuai Urutan Baru (0, 1, 2, 3)
+                counts = {'car': 0, 'motorcycle': 0, 'bicycle': 0, 'truck': 0}
                 
-                car_count = 0
+                # MAPPING BARU (Sesuai gambar kamu)
+                class_map = {
+                    0: 'car', 
+                    1: 'motorcycle', 
+                    2: 'bicycle',  # Sepeda menggantikan Bus
+                    3: 'truck'
+                }
+
                 for box in results[0].boxes:
-                    if int(box.cls) == 2: # Class 2 = Mobil
-                        car_count += 1
+                    cls_id = int(box.cls)
+                    if cls_id in class_map:
+                        counts[class_map[cls_id]] += 1
                 
-                # 2. Tentukan Status
-                status, icon = get_status(car_count)
-                message = f"{icon} Jalan Suhat {status} ({car_count} mobil) pada {filename}"
+                total_vehicle = sum(counts.values())
+
+                # 3. Status & Pesan
+                status, icon = get_status(total_vehicle)
+                detail_text = f"Mbl:{counts['car']} Mtr:{counts['motorcycle']} Spd:{counts['bicycle']} Trk:{counts['truck']}"
+                message = f"{icon} Suhat {status} ({total_vehicle}). {detail_text} pada {filename}"
                 
-                # 3. Masukkan ke Database
-                cur.execute("INSERT INTO traffic_data VALUES (?, ?)", (filename, car_count))
+                # 4. Insert ke DB (Kolom Bicycle)
+                cur.execute("INSERT INTO traffic_data VALUES (?, ?, ?, ?, ?, ?)", 
+                            (filename, total_vehicle, counts['car'], counts['motorcycle'], counts['bicycle'], counts['truck']))
                 cur.execute("INSERT INTO road_status VALUES (?, ?, ?)", (filename, status, icon))
                 cur.execute("INSERT INTO notifications VALUES (?, ?)", (filename, message))
                 
-                print(f"✅ DATA BARU: {message}")
-                
-                # 4. Tandai file ini sudah diproses
+                print(f"✅ DETEKSI OK: {message}")
                 processed_files.add(filename)
 
             conn.commit()
             conn.close()
-        
         else:
-            # Kalau gak ada file baru, diam aja
-            pass
-
-        # Istirahat 2 detik sebelum ngecek folder lagi biar CPU gak panas
-        time.sleep(2)
+            time.sleep(2)
 
     except KeyboardInterrupt:
-        print("\n🛑 Program dihentikan user.")
         break
     except Exception as e:
         print(f"Error: {e}")
