@@ -2,11 +2,12 @@ import os
 import sqlite3
 import time  # <--- Butuh ini buat jeda waktu
 import cv2 # <--- Butuh ini untuk menyimpan gambar
+import torch
 from ultralytics import YOLO
 
 # === Load YOLO Model ===
 print("Sedang memuat model YOLO...")
-model = YOLO("yolov8n.pt")
+model = YOLO("model.pt")
 
 # === Folder Gambar ===
 folder = "images/"
@@ -38,9 +39,9 @@ def setup_database():
 
 # === Fungsi Menentukan Status ===
 def get_status(total):
-    if total <= 2: return "lancar", "🟢"
-    elif total <= 4: return "ramai", "🟡"
-    elif total <= 10: return "padat", "🔴"
+    if total <= 10: return "lancar", "🟢"
+    elif total <= 20: return "ramai", "🟡"
+    elif total <= 30: return "padat", "🔴"
     else: return "macet", "⚠️"
 
 # === SETUP AWAL ===
@@ -77,17 +78,14 @@ while True:
                 output_path = os.path.join(folder_processed, filename)
                 cv2.imwrite(output_path, annotated_image)
 
-                car_count = 0
-                for box in results[0].boxes:
-                    if int(box.cls) == 2: # Class 2 = Mobil
-                        car_count += 1
+                total_vehicles = len(results[0].boxes)
                 
                 # 2. Tentukan Status
-                status, icon = get_status(car_count)
-                message = f"{icon} Jalan Suhat {status} ({car_count} mobil) pada {filename}"
+                status, icon = get_status(total_vehicles)
+                message = f"{icon} Jalan Suhat {status} ({total_vehicles} kendaraan) pada {filename}"
                 
                 # 3. Masukkan ke Database
-                cur.execute("INSERT INTO traffic_data VALUES (?, ?)", (filename, car_count))
+                cur.execute("INSERT INTO traffic_data VALUES (?, ?)", (filename, total_vehicles))
                 cur.execute("INSERT INTO road_status VALUES (?, ?, ?)", (filename, status, icon))
                 cur.execute("INSERT INTO notifications VALUES (?, ?)", (filename, message))
                 
