@@ -87,14 +87,15 @@ def run_etl():
                     cv2.imwrite(os.path.join(folder_processed, filename), annotated_image)
 
                     # 2. Hitung Sesuai Urutan Model Custom
-                    counts = {'car': 0, 'motorcycle': 0, 'bicycle': 0, 'truck': 0}
+                    counts = {'car': 0, 'motorcycle': 0, 'bicycle': 0, 'truck': 0, 'bus':0 }
                     
                     # MAPPING ID (Sesuai gambar kamu: 0=Car, 1=Motor, 2=Bicycle, 3=Truck)
                     class_map = {
-                        0: 'car', 
-                        1: 'motorcycle', 
-                        2: 'bicycle',
-                        3: 'truck'
+                        1: 'car', 
+                        2: 'motorcycle', 
+                        3: 'bicycle',
+                        4: 'truck',
+                        5: 'bus'
                     }
 
                     for box in results[0].boxes:
