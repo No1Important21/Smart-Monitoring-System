@@ -59,7 +59,7 @@ def run_storage():
     while True:
         manage_storage("images/")
         manage_storage("images_processed/")
-        time.sleep(10)
+        time.sleep(30)
 
 def run_etl():
     setup_database()

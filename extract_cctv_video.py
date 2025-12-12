@@ -53,8 +53,8 @@ def capture_screenshots():
                 last_capture_time = current_time
 
                 # Manage storage after saving the image
-                manage_storage("images/")
-                manage_storage("images_processed/")
+                # manage_storage("images/")
+                # manage_storage("images_processed/")
 
             # Sedikit delay untuk mengurangi beban CPU
             time.sleep(0.1)
