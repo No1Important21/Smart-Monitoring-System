@@ -7,31 +7,27 @@ from ultralytics import YOLO
 from extract_cctv_video import capture_screenshots
 from storage_management import manage_storage
 
-# === CONFIG ===
-# Menggunakan Model Custom Rizqy
+# === KONFIGURASI ===
 try:
     print("🤖 Memuat model custom (model.pt)...")
     model = YOLO("model.pt")
 except:
-    print("⚠️ model.pt tidak ditemukan! Pastikan file ada di folder.")
+    print("⚠️ model.pt tidak ditemukan! Program berhenti.")
     exit()
 
-# === Folder Gambar ===
 folder = "images/"
 folder_processed = "images_processed/"
-
-# Pastikan folder ada
+# Buat folder jika belum ada
 if not os.path.exists(folder): os.makedirs(folder)
 if not os.path.exists(folder_processed): os.makedirs(folder_processed)
 
-# === Database Setup ===
 db_name = "suhat_monitor.db"
 
 def setup_database():
     conn = sqlite3.connect(db_name)
     cur = conn.cursor()
-    
-    # UPDATE STRUKTUR: Kolom 'bus' diganti 'bicycle' (Sesuai Dashboard Baru)
+    # Kita tetap pakai nama kolom 'smp_value' di database agar kompatibel,
+    # tapi isinya nanti adalah nilai SKR (PKJI 2023).
     cur.execute("""
     CREATE TABLE IF NOT EXISTS traffic_data (
         image TEXT,
@@ -39,7 +35,8 @@ def setup_database():
         car INTEGER,
         motorcycle INTEGER,
         bicycle INTEGER,
-        truck INTEGER
+        truck INTEGER,
+        smp_value REAL
     )
     """)
     cur.execute("""CREATE TABLE IF NOT EXISTS road_status (image TEXT, status TEXT, icon TEXT)""")
@@ -47,12 +44,27 @@ def setup_database():
     conn.commit()
     conn.close()
 
-# === Status Jalan ===
-def get_status(total):
-    if total <= 15: return "lancar", "🟢"
-    elif total <= 40: return "ramai", "🟡"
-    elif total <= 80: return "padat", "🔴"
-    else: return "macet", "⚠️"
+# === LOGIKA PKJI 2023 (Pedoman Kapasitas Jalan Indonesia) ===
+def get_status_pkji(counts):
+    # Bobot Ekivalensi Kendaraan Ringan (ekr) untuk Jalan Perkotaan (Tipe 4/2 T):
+    # Sumber: PKJI 2023
+    
+    # KR (Kendaraan Ringan/Mobil) = 1.0
+    # SM (Sepeda Motor)           = 0.40 (Naik dibanding MKJI 97 yg 0.33)
+    # KB (Kendaraan Berat/Truk)   = 1.30
+    # UM (Unmotorized/Sepeda)     = 0.20 (Faktor hambatan samping)
+    
+    skr = (counts['car'] * 1.0) + \
+          (counts['motorcycle'] * 0.40) + \
+          (counts['truck'] * 1.30) + \
+          (counts['bicycle'] * 0.20)
+    
+    # Threshold (Batas) Macet berdasarkan Kapasitas Visual Frame CCTV
+    # (Disesuaikan dari kapasitas jalan ~3300 SKR/jam dibagi ke skala frame detik)
+    if skr <= 10: return "lancar", "🟢", skr
+    elif skr <= 30: return "ramai", "🟡", skr
+    elif skr <= 55: return "padat", "🔴", skr
+    else: return "macet", "⚠️", skr
 
 def run_storage():
     print("🧹 Storage Management berjalan...")
@@ -64,7 +76,8 @@ def run_storage():
 def run_etl():
     setup_database()
     processed_files = set()
-    print("\n🚀 ETL SYSTEM BERJALAN (Model Custom: 0=Mobil, 1=Motor)...")
+    print("\n🚀 ETL SYSTEM BERJALAN (Standar: PKJI 2023)...")
+    print(f"🧐 Kamus Internal Model: {model.names}")
     
     while True:
         try:
@@ -79,81 +92,42 @@ def run_etl():
                     image_path = os.path.join(folder, filename)
                     time.sleep(0.5)
 
-                    # 1. Deteksi
-                    results = model(image_path, verbose=False)
-
-                    # Remove overlapping bounding boxes with IoU > 90%
-                    boxes = results[0].boxes
-                    if len(boxes) > 1:
-                        # Calculate IoU and filter overlapping boxes
-                        keep_indices = list(range(len(boxes)))
-                        for i in range(len(boxes)):
-                            if i not in keep_indices:
-                                continue
-                            for j in range(i + 1, len(boxes)):
-                                if j not in keep_indices:
-                                    continue
-                                
-                                # Get box coordinates (xyxy format)
-                                box_i = boxes[i].xyxy[0].cpu().numpy()
-                                box_j = boxes[j].xyxy[0].cpu().numpy()
-                                
-                                # Calculate intersection area
-                                x1_inter = max(box_i[0], box_j[0])
-                                y1_inter = max(box_i[1], box_j[1])
-                                x2_inter = min(box_i[2], box_j[2])
-                                y2_inter = min(box_i[3], box_j[3])
-                                
-                                if x2_inter > x1_inter and y2_inter > y1_inter:
-                                    inter_area = (x2_inter - x1_inter) * (y2_inter - y1_inter)
-                                    box_i_area = (box_i[2] - box_i[0]) * (box_i[3] - box_i[1])
-                                    box_j_area = (box_j[2] - box_j[0]) * (box_j[3] - box_j[1])
-                                    union_area = box_i_area + box_j_area - inter_area
-                                    iou = inter_area / union_area if union_area > 0 else 0
-                                    
-                                    # If IoU > 80%, remove box with lower confidence
-                                    if iou > 0.8:
-                                        conf_i = boxes[i].conf[0].item()
-                                        conf_j = boxes[j].conf[0].item()
-                                        if conf_i < conf_j:
-                                            keep_indices.remove(i)
-                                        else:
-                                            keep_indices.remove(j)
-                        
-                        # Filter boxes to keep only selected indices
-                        results[0].boxes = boxes[keep_indices]
-
-                    # Simpan gambar hasil
+                    # Deteksi (Confidence 0.45: Seimbang antara sensitif & akurat)
+                    results = model(image_path, verbose=False, conf=0.45, iou=0.45)
+                    
                     annotated_image = results[0].plot()
                     cv2.imwrite(os.path.join(folder_processed, filename), annotated_image)
 
-                    # 2. Hitung Sesuai Urutan Model Custom
-                    counts = {'car': 0, 'motorcycle': 0, 'bicycle': 0, 'truck': 0, 'bus':0 }
-                    
-                    # MAPPING ID (Sesuai gambar kamu: 0=Car, 1=Motor, 2=Bicycle, 3=Truck)
-                    class_map = {
-                        1: 'car', 
-                        2: 'motorcycle', 
-                        3: 'bicycle',
-                        4: 'truck',
-                        5: 'bus'
-                    }
+                    # Reset Hitungan
+                    counts = {'car': 0, 'motorcycle': 0, 'bicycle': 0, 'truck': 0}
 
+                    # === LOGIKA BACA LABEL (Bukan ID Angka) ===
+                    # Mencegah error salah ID (Mobil masuk Sepeda)
                     for box in results[0].boxes:
                         cls_id = int(box.cls)
-                        if cls_id in class_map:
-                            counts[class_map[cls_id]] += 1
+                        cls_name = model.names[cls_id].lower() # Ambil nama, kecilkan huruf
+                        
+                        # Pencocokan Kata Kunci (Support Indo/Inggris)
+                        if 'mobil' in cls_name or 'car' in cls_name:
+                            counts['car'] += 1
+                        elif 'motor' in cls_name or 'cycle' in cls_name:
+                            counts['motorcycle'] += 1
+                        elif 'sepeda' in cls_name or 'bicycle' in cls_name or 'bike' in cls_name:
+                            counts['bicycle'] += 1
+                        elif 'truk' in cls_name or 'truck' in cls_name or 'bus' in cls_name:
+                            counts['truck'] += 1
                     
                     total_vehicle = sum(counts.values())
-
-                    # 3. Status & Insert DB
-                    status, icon = get_status(total_vehicle)
-                    detail_text = f"Mbl:{counts['car']} Mtr:{counts['motorcycle']} Spd:{counts['bicycle']} Trk:{counts['truck']}"
-                    message = f"{icon} Suhat {status} ({total_vehicle}). {detail_text}"
                     
-                    # Insert Data (Kolom Bicycle)
-                    cur.execute("INSERT INTO traffic_data VALUES (?, ?, ?, ?, ?, ?)", 
-                                (filename, total_vehicle, counts['car'], counts['motorcycle'], counts['bicycle'], counts['truck']))
+                    # HITUNG STATUS MENGGUNAKAN RUMUS PKJI 2023
+                    status, icon, skr_val = get_status_pkji(counts)
+                    
+                    detail_text = f"Mbl:{counts['car']} Mtr:{counts['motorcycle']} Spd:{counts['bicycle']} Trk:{counts['truck']}"
+                    message = f"{icon} Suhat {status} (Beban: {skr_val:.1f} SKR). {detail_text}"
+                    
+                    # Simpan ke Database
+                    cur.execute("INSERT INTO traffic_data VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                                (filename, total_vehicle, counts['car'], counts['motorcycle'], counts['bicycle'], counts['truck'], skr_val))
                     cur.execute("INSERT INTO road_status VALUES (?, ?, ?)", (filename, status, icon))
                     cur.execute("INSERT INTO notifications VALUES (?, ?)", (filename, message))
                     
@@ -163,7 +137,7 @@ def run_etl():
                 conn.commit()
                 conn.close()
             else:
-                pass # Tidak ada file baru
+                pass
 
             time.sleep(2)
 
@@ -174,12 +148,9 @@ def run_etl():
             print(f"Error in ETL: {e}")
 
 if __name__ == "__main__":
-    print("Starting Main System...")
-    
-    # Menjalankan 3 Proses Sekaligus
-    p1 = multiprocessing.Process(target=capture_screenshots) # Ambil CCTV
-    p2 = multiprocessing.Process(target=run_storage)       # Bersih-bersih
-    p3 = multiprocessing.Process(target=run_etl)           # Deteksi AI
+    p1 = multiprocessing.Process(target=capture_screenshots)
+    p2 = multiprocessing.Process(target=run_storage)
+    p3 = multiprocessing.Process(target=run_etl)
 
     p1.start()
     p2.start()
@@ -190,8 +161,6 @@ if __name__ == "__main__":
         p2.join()
         p3.join()
     except KeyboardInterrupt:
-        print("\nStopping all processes...")
         p1.terminate()
         p2.terminate()
         p3.terminate()
-        print("All processes stopped.")
