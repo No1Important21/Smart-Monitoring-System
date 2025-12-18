@@ -7,18 +7,18 @@ import plotly.express as px
 
 # === KONFIGURASI HALAMAN ===
 st.set_page_config(
-    page_title="Suhat Smart Monitor",
+    page_title="Road Smart Monitor",
     page_icon="🚦",
     layout="wide"
 )
 
 # === JUDUL DASHBOARD ===
-st.title("🚦 Monitoring Kepadatan Lalu Lintas - Jalan Suhat")
+st.title("🚦 Monitoring Kepadatan Lalu Lintas")
 st.markdown("Sistem pemantauan real-time berbasis **Computer Vision** & Standar **PKJI 2023**")
 
 # === FUNGSI AMBIL DATA ===
 def get_data():
-    conn = sqlite3.connect("suhat_monitor.db")
+    conn = sqlite3.connect("Jalan_monitor.db")
     # Ambil semua data termasuk total_vehicle (jumlah fisik) dan smp_value (beban SKR)
     query = """
     SELECT t.image, t.total_vehicle, t.car, t.motorcycle, t.bicycle, t.truck, t.smp_value, r.status, r.icon
@@ -144,7 +144,7 @@ while True:
             st.download_button(
                 label="📥 Download Laporan Lengkap (CSV)",
                 data=csv,
-                file_name='laporan_suhat_final.csv',
+                file_name='laporan_Jalan_final.csv',
                 mime='text/csv',
                 key=f"download_btn_{int(time.time())}"
             )

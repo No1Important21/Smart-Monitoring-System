@@ -21,7 +21,7 @@ folder_processed = "images_processed/"
 if not os.path.exists(folder): os.makedirs(folder)
 if not os.path.exists(folder_processed): os.makedirs(folder_processed)
 
-db_name = "suhat_monitor.db"
+db_name = "Jalan_monitor.db"
 
 def setup_database():
     conn = sqlite3.connect(db_name)
@@ -123,7 +123,7 @@ def run_etl():
                     status, icon, skr_val = get_status_pkji(counts)
                     
                     detail_text = f"Mbl:{counts['car']} Mtr:{counts['motorcycle']} Spd:{counts['bicycle']} Trk:{counts['truck']}"
-                    message = f"{icon} Suhat {status} (Beban: {skr_val:.1f} SKR). {detail_text}"
+                    message = f"{icon} Jalan {status} (Beban: {skr_val:.1f} SKR). {detail_text}"
                     
                     # Simpan ke Database
                     cur.execute("INSERT INTO traffic_data VALUES (?, ?, ?, ?, ?, ?, ?)", 

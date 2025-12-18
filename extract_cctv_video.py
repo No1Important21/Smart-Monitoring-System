@@ -5,7 +5,7 @@ from storage_management import manage_storage
 
 # === PENGATURAN ===
 #stream_url = "http://stream.cctv.malangkota.go.id/WebRTCApp/streams/673512185163543498056968.m3u8?token=null" # suhat
-stream_url = "https://atcs-dishub.bandung.go.id:1990/Gardujati/stream.m3u8" # bandung
+stream_url = "https://cctvjss.jogjakota.go.id/atcs/ATCS_Simpang_Letjen_Suprapto_KS_Tubun_View_Selatan.stream/chunklist_w1861726694.m3u8" # semarang
 output_folder = "images/"
 interval_seconds = 5  # Ambil screenshot tiap 5 detik
 
